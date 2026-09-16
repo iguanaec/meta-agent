@@ -15,6 +15,31 @@ function requireString(formData: FormData, field: string) {
   return value.trim();
 }
 
+// Cambia el estado de un lead y agrega la fila de historial correspondiente
+// en la misma transacción. No hace nada si el lead ya está en ese estado.
+async function transitionLeadStatus(
+  leadId: string,
+  toStatus: LeadStatus,
+  note: string | null,
+  userId: string
+) {
+  const lead = await db.lead.findUniqueOrThrow({ where: { id: leadId } });
+  if (lead.status === toStatus) return;
+
+  await db.$transaction([
+    db.lead.update({ where: { id: leadId }, data: { status: toStatus } }),
+    db.leadStatusHistory.create({
+      data: {
+        leadId,
+        fromStatus: lead.status,
+        toStatus,
+        note,
+        changedById: userId,
+      },
+    }),
+  ]);
+}
+
 export async function createLead(formData: FormData) {
   const name = requireString(formData, "name");
   const email = (formData.get("email") as string | null)?.trim() || null;
@@ -48,24 +73,9 @@ export async function changeLeadStatus(formData: FormData) {
     throw new Error("Estado inválido.");
   }
   const toStatus = toStatusRaw as LeadStatus;
-
-  const lead = await db.lead.findUniqueOrThrow({ where: { id: leadId } });
   const user = await getCurrentUser();
 
-  if (lead.status !== toStatus) {
-    await db.$transaction([
-      db.lead.update({ where: { id: leadId }, data: { status: toStatus } }),
-      db.leadStatusHistory.create({
-        data: {
-          leadId,
-          fromStatus: lead.status,
-          toStatus,
-          note,
-          changedById: user.id,
-        },
-      }),
-    ]);
-  }
+  await transitionLeadStatus(leadId, toStatus, note, user.id);
 
   revalidatePath("/crm");
   revalidatePath(`/crm/${leadId}`);
@@ -105,22 +115,8 @@ export async function registerDeal(formData: FormData) {
   });
 
   if (status === "WON") {
-    const lead = await db.lead.findUniqueOrThrow({ where: { id: leadId } });
-    if (lead.status !== LeadStatus.CUSTOMER) {
-      const user = await getCurrentUser();
-      await db.$transaction([
-        db.lead.update({ where: { id: leadId }, data: { status: LeadStatus.CUSTOMER } }),
-        db.leadStatusHistory.create({
-          data: {
-            leadId,
-            fromStatus: lead.status,
-            toStatus: LeadStatus.CUSTOMER,
-            note: "Venta registrada",
-            changedById: user.id,
-          },
-        }),
-      ]);
-    }
+    const user = await getCurrentUser();
+    await transitionLeadStatus(leadId, LeadStatus.CUSTOMER, "Venta registrada", user.id);
   }
 
   revalidatePath("/crm");

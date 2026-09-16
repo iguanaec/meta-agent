@@ -7,13 +7,10 @@ const DEFAULT_ADMIN_EMAIL = "admin@meta-agent.local";
 // seguridad del PLAN.md), sin bloquear el resto del dashboard en un sistema
 // de autenticación completo.
 export async function getCurrentUser() {
-  return db.user.upsert({
-    where: { email: DEFAULT_ADMIN_EMAIL },
-    update: {},
-    create: {
-      name: "Admin",
-      email: DEFAULT_ADMIN_EMAIL,
-      role: "ADMIN",
-    },
+  const existing = await db.user.findUnique({ where: { email: DEFAULT_ADMIN_EMAIL } });
+  if (existing) return existing;
+
+  return db.user.create({
+    data: { name: "Admin", email: DEFAULT_ADMIN_EMAIL, role: "ADMIN" },
   });
 }

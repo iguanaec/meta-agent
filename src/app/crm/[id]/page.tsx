@@ -1,16 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
-import { LeadStatus } from "@prisma/client";
+import { STATUS_LABELS } from "@/lib/lead-status";
 import { addInteraction, changeLeadStatus, registerDeal } from "../actions";
-
-const STATUS_LABELS: Record<LeadStatus, string> = {
-  NEW: "Nuevo",
-  CONTACTED: "Contactado",
-  QUALIFIED: "Calificado",
-  CUSTOMER: "Cliente",
-  LOST: "Perdido",
-};
 
 export default async function LeadDetailPage({ params }: PageProps<"/crm/[id]">) {
   const { id } = await params;
