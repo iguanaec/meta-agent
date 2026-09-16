@@ -1,0 +1,255 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Usuarios: quien aprueba recomendaciones y quien registra actividad del CRM.
+// ---------------------------------------------------------------------------
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  role      UserRole @default(ADMIN)
+  createdAt DateTime @default(now())
+
+  leadStatusChanges LeadStatusHistory[]
+  interactions      Interaction[]
+  approvals         Approval[]
+  auditLogs         AuditLog[]
+}
+
+enum UserRole {
+  ADMIN
+  TRAFFICKER
+  VIEWER
+}
+
+// ---------------------------------------------------------------------------
+// Bloque A - CRM de negocio
+// ---------------------------------------------------------------------------
+model Lead {
+  id          String     @id @default(cuid())
+  name        String
+  email       String?
+  phone       String?
+  source      String? // origen: nombre de campaña/anuncio, o texto libre por ahora
+  status      LeadStatus @default(NEW)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  statusHistory LeadStatusHistory[]
+  interactions  Interaction[]
+  deals         Deal[]
+
+  @@index([status])
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  CUSTOMER
+  LOST
+}
+
+// Cada cambio de estado queda como fila nueva: nunca se sobreescribe.
+model LeadStatusHistory {
+  id         String     @id @default(cuid())
+  leadId     String
+  lead       Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  fromStatus LeadStatus?
+  toStatus   LeadStatus
+  note       String?
+  changedById String?
+  changedBy   User?      @relation(fields: [changedById], references: [id])
+  createdAt  DateTime   @default(now())
+
+  @@index([leadId, createdAt])
+}
+
+// Nota de contacto (llamada, mensaje, reunión) ligada a un lead.
+model Interaction {
+  id        String   @id @default(cuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type      String // llamada, mensaje, email, reunion, otro
+  note      String
+  createdById String?
+  createdBy   User?    @relation(fields: [createdById], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([leadId, createdAt])
+}
+
+model Deal {
+  id        String     @id @default(cuid())
+  leadId    String
+  lead      Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  amount    Decimal    @db.Decimal(12, 2)
+  margin    Decimal?   @db.Decimal(12, 2)
+  status    DealStatus @default(WON)
+  closedAt  DateTime   @default(now())
+  createdAt DateTime   @default(now())
+
+  @@index([leadId])
+}
+
+enum DealStatus {
+  WON
+  LOST
+}
+
+// ---------------------------------------------------------------------------
+// Bloque B - Bitacora del agente (estructura de Meta, metricas, insights,
+// recomendaciones y aprobaciones). Se crea desde ya para no rediseñar el
+// esquema cuando se conecte la Marketing API / MCP de Meta (Fase 2).
+// ---------------------------------------------------------------------------
+model AdAccount {
+  id         String     @id @default(cuid())
+  externalId String     @unique // ID de cuenta publicitaria en Meta
+  name       String
+  campaigns  Campaign[]
+  createdAt  DateTime   @default(now())
+}
+
+model Campaign {
+  id          String    @id @default(cuid())
+  externalId  String    @unique
+  name        String
+  objective   String?
+  adAccountId String
+  adAccount   AdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  adSets      AdSet[]
+  metrics     MetricSnapshot[]
+  createdAt   DateTime  @default(now())
+
+  @@index([adAccountId])
+}
+
+model AdSet {
+  id         String   @id @default(cuid())
+  externalId String   @unique
+  name       String
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  ads        Ad[]
+  metrics    MetricSnapshot[]
+  createdAt  DateTime @default(now())
+
+  @@index([campaignId])
+}
+
+model Ad {
+  id        String   @id @default(cuid())
+  externalId String  @unique
+  name      String
+  adSetId   String
+  adSet     AdSet    @relation(fields: [adSetId], references: [id], onDelete: Cascade)
+  metrics   MetricSnapshot[]
+  createdAt DateTime @default(now())
+
+  @@index([adSetId])
+}
+
+// Una fila por objeto (campaña/conjunto/anuncio) por dia. Nunca se
+// sobreescribe un dia pasado, para conservar el historial propio aunque
+// Meta corrija datos de atribucion retroactivamente.
+model MetricSnapshot {
+  id          String    @id @default(cuid())
+  date        DateTime  @db.Date
+  campaignId  String?
+  campaign    Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  adSetId     String?
+  adSet       AdSet?    @relation(fields: [adSetId], references: [id], onDelete: Cascade)
+  adId        String?
+  ad          Ad?       @relation(fields: [adId], references: [id], onDelete: Cascade)
+  spend       Decimal   @db.Decimal(12, 2)
+  impressions Int       @default(0)
+  clicks      Int       @default(0)
+  results     Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  @@index([date])
+  @@index([campaignId, date])
+  @@index([adSetId, date])
+  @@index([adId, date])
+}
+
+model Insight {
+  id         String   @id @default(cuid())
+  targetType String // campaign | adset | ad
+  targetId   String
+  rule       String // nombre de la regla que lo disparo
+  summary    String
+  severity   String   @default("info") // info | warning | critical
+  createdAt  DateTime @default(now())
+
+  recommendations Recommendation[]
+
+  @@index([targetType, targetId])
+}
+
+model Recommendation {
+  id             String              @id @default(cuid())
+  insightId      String?
+  insight        Insight?            @relation(fields: [insightId], references: [id])
+  targetType     String
+  targetId       String
+  problem        String
+  action         String
+  budgetChange   Decimal?            @db.Decimal(12, 2)
+  rationale      String
+  expectedResult String
+  risks          String
+  reviewAt       DateTime?
+  revertIf       String
+  status         RecommendationStatus @default(PENDING)
+  createdAt      DateTime            @default(now())
+
+  approvals Approval[]
+
+  @@index([status])
+  @@index([targetType, targetId])
+}
+
+enum RecommendationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Approval {
+  id               String   @id @default(cuid())
+  recommendationId String
+  recommendation   Recommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  decidedById      String?
+  decidedBy        User?    @relation(fields: [decidedById], references: [id])
+  decision         ApprovalDecision
+  note             String?
+  createdAt        DateTime @default(now())
+
+  @@index([recommendationId])
+}
+
+enum ApprovalDecision {
+  APPROVED
+  REJECTED
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id])
+  action    String
+  entity    String
+  entityId  String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+}
