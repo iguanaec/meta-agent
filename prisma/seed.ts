@@ -1,16 +1,13 @@
 import { PrismaClient, LeadStatus } from "@prisma/client";
+import { DEFAULT_ADMIN } from "../src/lib/current-user";
 
 const db = new PrismaClient();
 
 async function main() {
   const admin = await db.user.upsert({
-    where: { email: "admin@meta-agent.local" },
+    where: { email: DEFAULT_ADMIN.email },
     update: {},
-    create: {
-      name: "Admin",
-      email: "admin@meta-agent.local",
-      role: "ADMIN",
-    },
+    create: DEFAULT_ADMIN,
   });
 
   const leadsSeed = [
@@ -23,22 +20,16 @@ async function main() {
 
   for (const seed of leadsSeed) {
     const existing = await db.lead.findFirst({ where: { name: seed.name } });
+
     if (existing) continue;
 
     const lead = await db.lead.create({
       data: {
         name: seed.name,
         source: seed.source,
-        status: LeadStatus.NEW,
-      },
-    });
-
-    await db.leadStatusHistory.create({
-      data: {
-        leadId: lead.id,
-        toStatus: LeadStatus.NEW,
-        note: "Lead creado (dato de ejemplo)",
-        changedById: admin.id,
+        statusHistory: {
+          create: { toStatus: LeadStatus.NEW, note: "Lead creado (dato de ejemplo)", changedById: admin.id },
+        },
       },
     });
 

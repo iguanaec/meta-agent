@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:seed": "tsx prisma/seed.ts"
+    "lint:oxc": "oxlint",
+    "db:seed": "prisma db seed"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -20,12 +21,14 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@oxlint/plugins": "1.83.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
+    "oxlint": "1.83.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.13",
     "typescript": "^5"

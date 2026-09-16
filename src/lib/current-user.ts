@@ -1,16 +1,20 @@
 import { db } from "@/lib/db";
 
-const DEFAULT_ADMIN_EMAIL = "admin@meta-agent.local";
+export const DEFAULT_ADMIN = {
+  name: "Admin",
+  email: "admin@meta-agent.local",
+  role: "ADMIN",
+} as const;
 
 // El MVP todavía no tiene login. Esta función da un usuario "actor" estable
 // para poder registrar quién hizo cada cambio (requisito de las reglas de
 // seguridad del PLAN.md), sin bloquear el resto del dashboard en un sistema
-// de autenticación completo.
+// de autenticación completo. `upsert` es atómico: dos llamadas concurrentes
+// nunca pueden chocar contra la restricción unique de `email`.
 export async function getCurrentUser() {
-  const existing = await db.user.findUnique({ where: { email: DEFAULT_ADMIN_EMAIL } });
-  if (existing) return existing;
-
-  return db.user.create({
-    data: { name: "Admin", email: DEFAULT_ADMIN_EMAIL, role: "ADMIN" },
+  return db.user.upsert({
+    where: { email: DEFAULT_ADMIN.email },
+    update: {},
+    create: DEFAULT_ADMIN,
   });
 }

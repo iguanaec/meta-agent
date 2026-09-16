@@ -1,32 +1,44 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { LeadStatus } from "@prisma/client";
-import { STATUS_LABELS, STATUS_STYLES } from "@/lib/lead-status";
+import { DealStatus } from "@prisma/client";
+import { LEAD_STATUSES, STATUS_LABELS, STATUS_STYLES } from "@/lib/statuses";
 import { createLead } from "./actions";
+import { TextInput, SubmitButton } from "./ui";
 
-export default async function CrmPage({
-  searchParams,
-}: PageProps<"/crm">) {
+function pillClassName(active: boolean) {
+  return `rounded-full px-3 py-1 ${
+    active
+      ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+      : "bg-zinc-100 text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+  }`;
+}
+
+export default async function CrmPage({ searchParams }: PageProps<"/crm">) {
   const params = await searchParams;
-  const statusFilterRaw = typeof params.status === "string" ? params.status : undefined;
-  const statusFilter =
-    statusFilterRaw && statusFilterRaw in STATUS_LABELS
-      ? (statusFilterRaw as LeadStatus)
-      : undefined;
+  const statusParam = params.status;
+  const statusFilterRaw = Array.isArray(statusParam) ? statusParam[0] : statusParam;
+  const statusFilter = LEAD_STATUSES.find((status) => status === statusFilterRaw);
 
   const [leads, counts] = await Promise.all([
     db.lead.findMany({
       where: statusFilter ? { status: statusFilter } : undefined,
       orderBy: { updatedAt: "desc" },
-      include: { deals: true },
+      include: { _count: { select: { deals: { where: { status: DealStatus.WON } } } } },
     }),
     db.lead.groupBy({ by: ["status"], _count: true }),
   ]);
 
-  const countByStatus = Object.fromEntries(
-    counts.map((c) => [c.status, c._count])
-  ) as Partial<Record<LeadStatus, number>>;
+  const countByStatus = new Map(counts.map((c) => [c.status, c._count]));
   const totalLeads = counts.reduce((sum, c) => sum + c._count, 0);
+
+  const filterPills = [
+    { href: "/crm", label: `Todos (${totalLeads})`, active: !statusFilter },
+    ...LEAD_STATUSES.map((status) => ({
+      href: `/crm?status=${status}`,
+      label: `${STATUS_LABELS[status]} (${countByStatus.get(status) ?? 0})`,
+      active: statusFilter === status,
+    })),
+  ];
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -39,27 +51,9 @@ export default async function CrmPage({
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2 text-sm">
-        <Link
-          href="/crm"
-          className={`rounded-full px-3 py-1 ${
-            !statusFilter
-              ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-              : "bg-zinc-100 text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
-          }`}
-        >
-          Todos ({totalLeads})
-        </Link>
-        {(Object.keys(STATUS_LABELS) as LeadStatus[]).map((status) => (
-          <Link
-            key={status}
-            href={`/crm?status=${status}`}
-            className={`rounded-full px-3 py-1 ${
-              statusFilter === status
-                ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                : "bg-zinc-100 text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
-            }`}
-          >
-            {STATUS_LABELS[status]} ({countByStatus[status] ?? 0})
+        {filterPills.map((pill) => (
+          <Link key={pill.href} href={pill.href} className={pillClassName(pill.active)}>
+            {pill.label}
           </Link>
         ))}
       </div>
@@ -102,7 +96,7 @@ export default async function CrmPage({
                   </span>
                 </td>
                 <td className="px-4 py-2 text-zinc-500">
-                  {lead.deals.filter((d) => d.status === "WON").length} ganada(s)
+                  {lead._count.deals} ganada(s)
                 </td>
                 <td className="px-4 py-2 text-zinc-400">
                   {lead.updatedAt.toLocaleDateString("es-MX")}
@@ -118,34 +112,11 @@ export default async function CrmPage({
           Agregar lead nuevo
         </h2>
         <form action={createLead} className="mt-3 flex flex-col gap-3">
-          <input
-            name="name"
-            placeholder="Nombre completo"
-            required
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          <input
-            name="email"
-            type="email"
-            placeholder="Email (opcional)"
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          <input
-            name="phone"
-            placeholder="Teléfono (opcional)"
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          <input
-            name="source"
-            placeholder="Origen (ej. nombre de campaña)"
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          <button
-            type="submit"
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900"
-          >
-            Crear lead
-          </button>
+          <TextInput name="name" placeholder="Nombre completo" required />
+          <TextInput name="email" type="email" placeholder="Email (opcional)" />
+          <TextInput name="phone" placeholder="Teléfono (opcional)" />
+          <TextInput name="source" placeholder="Origen (ej. nombre de campaña)" />
+          <SubmitButton>Crear lead</SubmitButton>
         </form>
       </section>
     </div>

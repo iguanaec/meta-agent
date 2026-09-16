@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
-import { STATUS_LABELS } from "@/lib/lead-status";
+import { DEAL_STATUS_LABELS, STATUS_LABELS } from "@/lib/statuses";
+import { buildLeadTimeline } from "@/lib/timeline";
 import { addInteraction, changeLeadStatus, registerDeal } from "../actions";
+import { TextInput, Select, SubmitButton } from "../ui";
 
 export default async function LeadDetailPage({ params }: PageProps<"/crm/[id]">) {
   const { id } = await params;
@@ -18,35 +20,7 @@ export default async function LeadDetailPage({ params }: PageProps<"/crm/[id]">)
 
   if (!lead) notFound();
 
-  type TimelineEntry = {
-    id: string;
-    createdAt: Date;
-    kind: "status" | "interaction";
-    label: string;
-    note: string | null;
-    by: string;
-  };
-
-  const timeline: TimelineEntry[] = [
-    ...lead.statusHistory.map((h) => ({
-      id: `status-${h.id}`,
-      createdAt: h.createdAt,
-      kind: "status" as const,
-      label: h.fromStatus
-        ? `${STATUS_LABELS[h.fromStatus]} → ${STATUS_LABELS[h.toStatus]}`
-        : `Creado como ${STATUS_LABELS[h.toStatus]}`,
-      note: h.note,
-      by: h.changedBy?.name ?? "Sistema",
-    })),
-    ...lead.interactions.map((i) => ({
-      id: `interaction-${i.id}`,
-      createdAt: i.createdAt,
-      kind: "interaction" as const,
-      label: i.type,
-      note: i.note,
-      by: i.createdBy?.name ?? "Sistema",
-    })),
-  ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  const timeline = buildLeadTimeline(lead.statusHistory, lead.interactions);
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -75,29 +49,19 @@ export default async function LeadDetailPage({ params }: PageProps<"/crm/[id]">)
           </h2>
           <form action={changeLeadStatus} className="mt-3 flex flex-col gap-2">
             <input type="hidden" name="leadId" value={lead.id} />
-            <select
-              key={lead.status}
-              name="toStatus"
-              defaultValue={lead.status}
-              className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            >
+            {/* key={lead.status} fuerza a React a remontar el <select> cuando
+                cambia el estado del lead, para que defaultValue se re-aplique
+                tras el revalidate (si no, el navegador conserva la selección
+                anterior en el mismo nodo DOM). */}
+            <Select key={lead.status} name="toStatus" defaultValue={lead.status}>
               {Object.entries(STATUS_LABELS).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
               ))}
-            </select>
-            <input
-              name="note"
-              placeholder="Nota (opcional)"
-              className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            />
-            <button
-              type="submit"
-              className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900"
-            >
-              Guardar estado
-            </button>
+            </Select>
+            <TextInput name="note" placeholder="Nota (opcional)" />
+            <SubmitButton>Guardar estado</SubmitButton>
           </form>
         </section>
 
@@ -107,39 +71,44 @@ export default async function LeadDetailPage({ params }: PageProps<"/crm/[id]">)
           </h2>
           <form action={registerDeal} className="mt-3 flex flex-col gap-2">
             <input type="hidden" name="leadId" value={lead.id} />
-            <input
-              name="amount"
-              type="number"
-              step="0.01"
-              min="0"
-              placeholder="Monto"
-              required
-              className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            />
-            <input
-              name="margin"
-              type="number"
-              step="0.01"
-              placeholder="Margen (opcional)"
-              className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            />
-            <select
-              name="status"
-              defaultValue="WON"
-              className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            >
-              <option value="WON">Ganada</option>
-              <option value="LOST">Perdida</option>
-            </select>
-            <button
-              type="submit"
-              className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900"
-            >
-              Guardar venta
-            </button>
+            <TextInput name="amount" type="number" step="0.01" min="0" placeholder="Monto" required />
+            <TextInput name="margin" type="number" step="0.01" placeholder="Margen (opcional)" />
+            <Select name="status" defaultValue="WON">
+              {Object.entries(DEAL_STATUS_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+            <SubmitButton>Guardar venta</SubmitButton>
           </form>
         </section>
       </div>
+
+      <section className="mt-6 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+          Ventas
+        </h2>
+        {lead.deals.length === 0 ? (
+          <p className="mt-2 text-sm text-zinc-400">Sin ventas registradas todavía.</p>
+        ) : (
+          <ul className="mt-2 flex flex-col gap-1 text-sm">
+            {lead.deals.map((deal) => (
+              <li key={deal.id} className="flex items-baseline justify-between gap-2">
+                <span className="text-zinc-900 dark:text-zinc-50">
+                  ${deal.amount.toString()}
+                  {deal.margin !== null && (
+                    <span className="text-zinc-500"> (margen ${deal.margin.toString()})</span>
+                  )}
+                </span>
+                <span className="text-zinc-400">
+                  {DEAL_STATUS_LABELS[deal.status]} · {deal.closedAt.toLocaleDateString("es-MX")}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section className="mt-6 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
@@ -147,29 +116,15 @@ export default async function LeadDetailPage({ params }: PageProps<"/crm/[id]">)
         </h2>
         <form action={addInteraction} className="mt-3 flex flex-col gap-2 sm:flex-row">
           <input type="hidden" name="leadId" value={lead.id} />
-          <select
-            name="type"
-            defaultValue="llamada"
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          >
+          <Select name="type" defaultValue="llamada">
             <option value="llamada">Llamada</option>
             <option value="mensaje">Mensaje</option>
             <option value="email">Email</option>
             <option value="reunion">Reunión</option>
             <option value="otro">Otro</option>
-          </select>
-          <input
-            name="note"
-            placeholder="¿Qué pasó?"
-            required
-            className="flex-1 rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          <button
-            type="submit"
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900"
-          >
-            Agregar
-          </button>
+          </Select>
+          <TextInput name="note" placeholder="¿Qué pasó?" required className="flex-1" />
+          <SubmitButton>Agregar</SubmitButton>
         </form>
       </section>
 
