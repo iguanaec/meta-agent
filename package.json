@@ -5,9 +5,11 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "vercel-build": "prisma generate && prisma migrate deploy && next build",
     "start": "next start",
     "lint": "eslint",
     "lint:oxc": "oxlint",
+    "postinstall": "prisma generate",
     "db:seed": "prisma db seed"
   },
   "prisma": {
