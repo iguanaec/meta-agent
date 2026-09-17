@@ -17,9 +17,12 @@ export default function CrmLayout({ children }: LayoutProps<"/crm">) {
           >
             Leads y CRM
           </Link>
-          <span className="cursor-not-allowed rounded-md px-3 py-2 text-zinc-400">
-            Campañas (próximamente)
-          </span>
+          <Link
+            href="/crm/campaigns"
+            className="rounded-md px-3 py-2 font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900"
+          >
+            Campañas
+          </Link>
           <span className="cursor-not-allowed rounded-md px-3 py-2 text-zinc-400">
             Reportes (próximamente)
           </span>
